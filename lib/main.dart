@@ -2408,6 +2408,7 @@ class GoalsScreen extends ConsumerWidget {
               child: const Text('Qo\'shish'),
             ),
           ],
+
         ),
       ),
     );
