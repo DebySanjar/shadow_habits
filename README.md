@@ -1,16 +1,28 @@
-# appbarbody
+# Shadow Habits – O'tkazib yuborilgan imkoniyatlarni kuzatuvchi va odatlarni shakllantiruvchi ilova
 
-A new Flutter project.
+**Shadow Habits** – bu Flutter'da yaratilgan mobil ilova bo'lib, o'tkazib yuborilgan imkoniyatlarni qayd etish, maqsadlarni belgilash, AI tahlili va gamifikatsiya elementlari orqali foydalanuvchilarni motivatsiya qiladi. Ilova doimiy xotirada (shared_preferences orqali) ishlaydi va offline rejimda to'liq funksional.
 
-## Getting Started
+## Xususiyatlari
+- 📅 **Kalendar va Statistikalar** – Kunlik missed opportunities va progressni kuzatish.
+- 🎯 **Maqsadlar** – Maqsadlarni qo'yish, subtasks va XP tizimi bilan.
+- 🧠 **AI Tahlili** – O'tkazilgan imkoniyatlarga asoslangan maslahatlar.
+- 🎮 **Gamifikatsiya** – Levels, badges, streaks va mukofotlar (Habitica uslubida).
+- 🌗 **Dark/Light Tema** – Foydalanuvchi tanloviga asoslangan.
+- 📱 **Responsive Dizayn** – Mobil, tablet va desktop uchun moslashgan.
 
-This project is a starting point for a Flutter application.
+## Demo
+Telegram kanalda jonli namoyish va yangiliklar: [@shadow_habits](https://t.me/qidirsa_chiqadi)  
+Ilova APK linki: [Shadow Habits APK](https://t.me/qidirsa_chiqadi/167) (kanalda joylangan).
 
-A few resources to get you started if this is your first Flutter project:
+### Screenshots
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+![Asosiy sahifa](<img width="591" height="1280" alt="image" src="https://github.com/user-attachments/assets/b4377a19-a0e4-47b4-b890-52791240c13c" />)  
+*Asosiy sahifa – missed opportunities ro'yxati*
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+![Maqsadlar bo'limi](<img width="591" height="1280" alt="image" src="https://github.com/user-attachments/assets/ff36552d-a680-4d0e-be54-2e7a87aaea22" />)  
+*Maqsadlar bo'limi – progress va subtasks bilan*
+
+## O'rnatish va Foydalanish
+1. GitHub'dan kodni klonlang:  
+   ```bash
+   git clone https://github.com/your_username/shadow-habits.git
