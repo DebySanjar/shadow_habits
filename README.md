@@ -16,10 +16,10 @@ Ilova APK linki: [Shadow Habits APK](https://t.me/qidirsa_chiqadi/167) (kanalda 
 
 ### Screenshots
 
-![Asosiy sahifa](<img width="591" height="1280" alt="image" src="https://github.com/user-attachments/assets/b4377a19-a0e4-47b4-b890-52791240c13c" />)  
+![Asosiy sahifa](https://github.com/user-attachments/assets/b4377a19-a0e4-47b4-b890-52791240c13c)  
 *Asosiy sahifa – missed opportunities ro'yxati*
 
-![Maqsadlar bo'limi](<img width="591" height="1280" alt="image" src="https://github.com/user-attachments/assets/ff36552d-a680-4d0e-be54-2e7a87aaea22" />)  
+![Maqsadlar bo'limi](https://github.com/user-attachments/assets/ff36552d-a680-4d0e-be54-2e7a87aaea22)  
 *Maqsadlar bo'limi – progress va subtasks bilan*
 
 ## O'rnatish va Foydalanish
