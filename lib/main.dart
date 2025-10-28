@@ -1,18 +1,211 @@
-// pubspec.yaml dependencies kerak:
-// flutter_riverpod: ^2.4.9
-// go_router: ^12.1.1
-// shared_preferences: ^2.2.2
-// fl_chart: ^0.65.0
-// intl: ^0.18.1
-// share_plus: ^7.0.0
-// table_calendar: ^3.0.9
-// pdf: ^3.10.7
-// path_provider: ^2.1.1
+// main.dart - Gamifikatsiya elementlari qo'shilgan versiya
+// CalendarScreen ning pastida animatsiyali va colorful Gamification bo'limi qo'shildi
 
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+// ============ STORAGE SERVICE ============
+class StorageService {
+  static const String _opportunitiesKey = 'missed_opportunities';
+  static const String _goalsKey = 'goals';
+  static const String _categoriesKey = 'categories';
+  static const String _themeKey = 'isDarkMode';
+  static const String _progressKey = 'user_progress';
+
+  static final StorageService _instance = StorageService._internal();
+
+  factory StorageService() => _instance;
+
+  StorageService._internal();
+
+  late SharedPreferences _prefs;
+
+  Future<void> init() async {
+    _prefs = await SharedPreferences.getInstance();
+  }
+
+  // Opportunities
+  Future<void> saveOpportunities(List<MissedOpportunity> opportunities) async {
+    final jsonList = opportunities.map((o) => o.toJson()).toList();
+    await _prefs.setString(_opportunitiesKey, jsonEncode(jsonList));
+  }
+
+  List<MissedOpportunity> loadOpportunities() {
+    final jsonString = _prefs.getString(_opportunitiesKey);
+    if (jsonString == null) return [];
+    final List<dynamic> jsonList = jsonDecode(jsonString);
+    return jsonList.map((json) => MissedOpportunity.fromJson(json)).toList()
+      ..sort((a, b) => a.order.compareTo(b.order));
+  }
+
+  // Goals (subtasks bilan saqlash uchun yangilandi)
+  Future<void> saveGoals(List<Goal> goals) async {
+    final jsonList = goals
+        .map(
+          (g) => {
+            'id': g.id,
+            'title': g.title,
+            'targetDays': g.targetDays,
+            'startDate': g.startDate.toIso8601String(),
+            'isCompleted': g.isCompleted,
+            'subtasks': g.subtasks.map((st) => st.toJson()).toList(),
+          },
+        )
+        .toList();
+    await _prefs.setString(_goalsKey, jsonEncode(jsonList));
+  }
+
+  List<Goal> loadGoals() {
+    final jsonString = _prefs.getString(_goalsKey);
+    if (jsonString == null) return [];
+    final List<dynamic> jsonList = jsonDecode(jsonString);
+    return jsonList
+        .map(
+          (json) => Goal(
+            id: json['id'],
+            title: json['title'],
+            targetDays: json['targetDays'],
+            startDate: DateTime.parse(json['startDate']),
+            isCompleted: json['isCompleted'] ?? false,
+            subtasks: (json['subtasks'] as List<dynamic>? ?? [])
+                .map((stJson) => Subtask.fromJson(stJson))
+                .toList(),
+          ),
+        )
+        .toList();
+  }
+
+  // Categories
+  Future<void> saveCategories(List<String> categories) async {
+    await _prefs.setStringList(_categoriesKey, categories);
+  }
+
+  List<String> loadCategories() {
+    return _prefs.getStringList(_categoriesKey) ??
+        ['Salomatlik', 'Ta\'lim', 'Ish', 'Ijtimoiy', 'Boshqa'];
+  }
+
+  // Theme
+  bool isDarkMode() => _prefs.getBool(_themeKey) ?? true;
+
+  Future<void> setDarkMode(bool isDark) async {
+    await _prefs.setBool(_themeKey, isDark);
+  }
+
+  // User Progress (Gamification)
+  Future<void> saveProgress(UserProgress progress) async {
+    final json = progress.toJson();
+    await _prefs.setString(_progressKey, jsonEncode(json));
+  }
+
+  UserProgress loadProgress() {
+    final jsonString = _prefs.getString(_progressKey);
+    if (jsonString == null) return UserProgress();
+    final json = jsonDecode(jsonString);
+    return UserProgress.fromJson(json);
+  }
+}
+
+// ============ GAMIFICATION MODEL ============
+class UserProgress {
+  int level;
+  int xp;
+  int currentStreak;
+  List<String> badges;
+
+  UserProgress({
+    this.level = 1,
+    this.xp = 0,
+    this.currentStreak = 0,
+    this.badges = const [],
+  });
+
+  void addXp(int amount) {
+    xp += amount;
+    if (xp >= level * 100) {
+      level++;
+      xp = 0;
+    }
+  }
+
+  void updateStreak(bool didCompleteToday) {
+    if (didCompleteToday) {
+      currentStreak++;
+    } else {
+      currentStreak = 0;
+    }
+  }
+
+  void addBadge(String badge) {
+    if (!badges.contains(badge)) {
+      badges.add(badge);
+    }
+  }
+
+  Map<String, dynamic> toJson() => {
+    'level': level,
+    'xp': xp,
+    'currentStreak': currentStreak,
+    'badges': badges,
+  };
+
+  factory UserProgress.fromJson(Map<String, dynamic> json) => UserProgress(
+    level: json['level'] ?? 1,
+    xp: json['xp'] ?? 0,
+    currentStreak: json['currentStreak'] ?? 0,
+    badges: List<String>.from(json['badges'] ?? []),
+  );
+}
+
+// ============ PROGRESS VIEW MODEL ============
+final progressProvider = StateNotifierProvider<ProgressViewModel, UserProgress>(
+  (ref) => ProgressViewModel(),
+);
+
+class ProgressViewModel extends StateNotifier<UserProgress> {
+  final StorageService _storage = StorageService();
+
+  ProgressViewModel() : super(UserProgress()) {
+    state = _storage.loadProgress();
+  }
+
+  void addXp(int amount) {
+    state.addXp(amount);
+    _storage.saveProgress(state);
+    state = UserProgress(
+      level: state.level,
+      xp: state.xp,
+      currentStreak: state.currentStreak,
+      badges: state.badges,
+    );
+  }
+
+  void updateStreak(bool didComplete) {
+    state.updateStreak(didComplete);
+    _storage.saveProgress(state);
+    state = UserProgress(
+      level: state.level,
+      xp: state.xp,
+      currentStreak: state.currentStreak,
+      badges: state.badges,
+    );
+  }
+
+  void addBadge(String badge) {
+    state.addBadge(badge);
+    _storage.saveProgress(state);
+    state = UserProgress(
+      level: state.level,
+      xp: state.xp,
+      currentStreak: state.currentStreak,
+      badges: state.badges,
+    );
+  }
+}
 
 // ============ THEME PROVIDER ============
 final themeProvider = StateNotifierProvider<ThemeNotifier, ThemeMode>((ref) {
@@ -20,10 +213,19 @@ final themeProvider = StateNotifierProvider<ThemeNotifier, ThemeMode>((ref) {
 });
 
 class ThemeNotifier extends StateNotifier<ThemeMode> {
-  ThemeNotifier() : super(ThemeMode.dark);
+  final StorageService _storage = StorageService();
+
+  ThemeNotifier() : super(ThemeMode.dark) {
+    _loadTheme();
+  }
+
+  void _loadTheme() {
+    state = _storage.isDarkMode() ? ThemeMode.dark : ThemeMode.light;
+  }
 
   void toggleTheme() {
     state = state == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+    _storage.setDarkMode(state == ThemeMode.dark);
   }
 }
 
@@ -166,6 +368,7 @@ class Goal {
   final int targetDays;
   final DateTime startDate;
   final bool isCompleted;
+  final List<Subtask> subtasks; // Yangi: Subtasks list qo'shildi
 
   Goal({
     required this.id,
@@ -173,17 +376,31 @@ class Goal {
     required this.targetDays,
     required this.startDate,
     this.isCompleted = false,
+    this.subtasks = const [],
   });
 
-  Goal copyWith({bool? isCompleted}) {
+  Goal copyWith({bool? isCompleted, List<Subtask>? subtasks}) {
     return Goal(
       id: id,
       title: title,
       targetDays: targetDays,
       startDate: startDate,
       isCompleted: isCompleted ?? this.isCompleted,
+      subtasks: subtasks ?? this.subtasks,
     );
   }
+}
+
+class Subtask {
+  final String title;
+  final bool isCompleted;
+
+  Subtask({required this.title, this.isCompleted = false});
+
+  Map<String, dynamic> toJson() => {'title': title, 'isCompleted': isCompleted};
+
+  factory Subtask.fromJson(Map<String, dynamic> json) =>
+      Subtask(title: json['title'], isCompleted: json['isCompleted'] ?? false);
 }
 
 class AIInsight {
@@ -203,12 +420,19 @@ class AIInsight {
 // ============ VIEW MODELS ============
 class OpportunityViewModel
     extends StateNotifier<AsyncValue<List<MissedOpportunity>>> {
+  final StorageService _storage = StorageService();
+
   OpportunityViewModel() : super(const AsyncValue.loading()) {
     _loadOpportunities();
   }
 
-  void _loadOpportunities() {
-    state = AsyncValue.data([]);
+  Future<void> _loadOpportunities() async {
+    try {
+      final opportunities = _storage.loadOpportunities();
+      state = AsyncValue.data(opportunities);
+    } catch (e) {
+      state = AsyncValue.error(e, StackTrace.current);
+    }
   }
 
   void addOpportunity(MissedOpportunity opportunity) {
@@ -216,27 +440,27 @@ class OpportunityViewModel
       final newOrder = opportunities.isEmpty
           ? 0
           : opportunities.map((e) => e.order).reduce(math.max) + 1;
-      state = AsyncValue.data([
-        ...opportunities,
-        opportunity.copyWith(order: newOrder),
-      ]);
+      final newList = [...opportunities, opportunity.copyWith(order: newOrder)];
+      state = AsyncValue.data(newList);
+      _storage.saveOpportunities(newList);
     });
   }
 
   void updateOpportunity(MissedOpportunity opportunity) {
     state.whenData((opportunities) {
-      final index = opportunities.indexWhere((o) => o.id == opportunity.id);
-      if (index != -1) {
-        final updated = [...opportunities];
-        updated[index] = opportunity;
-        state = AsyncValue.data(updated);
-      }
+      final updated = opportunities
+          .map((o) => o.id == opportunity.id ? opportunity : o)
+          .toList();
+      state = AsyncValue.data(updated);
+      _storage.saveOpportunities(updated);
     });
   }
 
   void removeOpportunity(String id) {
     state.whenData((opportunities) {
-      state = AsyncValue.data(opportunities.where((o) => o.id != id).toList());
+      final filtered = opportunities.where((o) => o.id != id).toList();
+      state = AsyncValue.data(filtered);
+      _storage.saveOpportunities(filtered);
     });
   }
 
@@ -252,6 +476,7 @@ class OpportunityViewModel
       }
 
       state = AsyncValue.data(items);
+      _storage.saveOpportunities(items);
     });
   }
 
@@ -295,7 +520,6 @@ class OpportunityViewModel
 
         List<AIInsight> insights = [];
 
-        // Eng ko'p uchraydigan sabab
         Map<String, int> reasonCount = {};
         for (var opp in opportunities) {
           reasonCount[opp.reason] = (reasonCount[opp.reason] ?? 0) + 1;
@@ -314,7 +538,6 @@ class OpportunityViewModel
           );
         }
 
-        // Vaqt tahlili
         int morningCount = 0, eveningCount = 0;
         for (var opp in opportunities) {
           if (opp.missedDate.hour < 12) {
@@ -334,7 +557,6 @@ class OpportunityViewModel
           );
         }
 
-        // Xavfli kategoriya
         Map<String, int> categoryCount = {};
         for (var opp in opportunities) {
           categoryCount[opp.category] = (categoryCount[opp.category] ?? 0) + 1;
@@ -353,7 +575,6 @@ class OpportunityViewModel
           );
         }
 
-        // Tavsiya
         insights.add(
           AIInsight(
             title: 'Tavsiya',
@@ -371,21 +592,30 @@ class OpportunityViewModel
 }
 
 class CategoriesViewModel extends StateNotifier<List<String>> {
-  CategoriesViewModel()
-    : super(['Salomatlik', 'Ta\'lim', 'Ish', 'Ijtimoiy', 'Boshqa']);
+  final StorageService _storage = StorageService();
+
+  CategoriesViewModel() : super([]) {
+    state = _storage.loadCategories();
+  }
 
   void addCategory(String category) {
     if (!state.contains(category) && category.isNotEmpty) {
       state = [...state, category];
+      _storage.saveCategories(state);
     }
   }
 }
 
 class GoalsViewModel extends StateNotifier<List<Goal>> {
-  GoalsViewModel() : super([]);
+  final StorageService _storage = StorageService();
+
+  GoalsViewModel() : super([]) {
+    state = _storage.loadGoals();
+  }
 
   void addGoal(Goal goal) {
     state = [...state, goal];
+    _storage.saveGoals(state);
   }
 
   void toggleGoalCompletion(String id) {
@@ -395,10 +625,40 @@ class GoalsViewModel extends StateNotifier<List<Goal>> {
       }
       return goal;
     }).toList();
+    _storage.saveGoals(state);
   }
 
   void removeGoal(String id) {
     state = state.where((goal) => goal.id != id).toList();
+    _storage.saveGoals(state);
+  }
+
+  void addSubtask(String goalId, Subtask subtask) {
+    state = state.map((goal) {
+      if (goal.id == goalId) {
+        return goal.copyWith(subtasks: [...goal.subtasks, subtask]);
+      }
+      return goal;
+    }).toList();
+    _storage.saveGoals(state);
+  }
+
+  void toggleSubtaskCompletion(String goalId, int subtaskIndex) {
+    state = state.map((goal) {
+      if (goal.id == goalId) {
+        final updatedSubtasks = goal.subtasks.asMap().entries.map((entry) {
+          final index = entry.key;
+          final st = entry.value;
+          if (index == subtaskIndex) {
+            return Subtask(title: st.title, isCompleted: !st.isCompleted);
+          }
+          return st;
+        }).toList();
+        return goal.copyWith(subtasks: updatedSubtasks);
+      }
+      return goal;
+    }).toList();
+    _storage.saveGoals(state);
   }
 }
 
@@ -421,7 +681,9 @@ final goalsProvider = StateNotifierProvider<GoalsViewModel, List<Goal>>(
 final selectedIndexProvider = StateProvider<int>((ref) => 0);
 
 // ============ MAIN APP ============
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await StorageService().init();
   runApp(const ProviderScope(child: ShadowHabitsApp()));
 }
 
@@ -1055,14 +1317,6 @@ class _OpportunityCardState extends ConsumerState<OpportunityCard>
   }
 
   void _shareOpportunity() {
-    final text =
-        '''
-${widget.opportunity.title}
-Kategoriya: ${widget.opportunity.category}
-Sabab: ${widget.opportunity.reason}
-Ta'sir: ${widget.opportunity.impactLevel}/5
-    ''';
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Ulashish: ${widget.opportunity.title}'),
@@ -1460,6 +1714,7 @@ class CalendarScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 30),
             Expanded(
+              flex: 1,
               child: Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -1476,6 +1731,8 @@ class CalendarScreen extends ConsumerWidget {
                 child: CalendarHeatMap(data: calendarData),
               ),
             ),
+            const SizedBox(height: 30),
+            Expanded(flex: 1, child: GamificationSection()),
           ],
         ),
       ),
@@ -1540,14 +1797,147 @@ class CalendarHeatMap extends StatelessWidget {
   }
 }
 
+// ============ GAMIFICATION SECTION (Animatsiyali va colorful) ============
+class GamificationSection extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final progress = ref.watch(progressProvider);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: [AppColors.primary, AppColors.accent]),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Gamifikatsiya',
+              style: TextStyle(
+                fontSize: 24,
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            _buildLevelProgress(progress, context),
+            const SizedBox(height: 16),
+            _buildStreakCounter(progress, context),
+            const SizedBox(height: 16),
+            _buildBadgesList(progress, context),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () {
+                ref.read(progressProvider.notifier).addXp(50);
+                ref.read(progressProvider.notifier).updateStreak(true);
+                ref
+                    .read(progressProvider.notifier)
+                    .addBadge('Motivatsiya Ustasi');
+              },
+              child: const Text('XP Qo\'shish va Streak Yangilash'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLevelProgress(UserProgress progress, BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Daraja: ${progress.level}',
+          style: const TextStyle(color: Colors.white, fontSize: 18),
+        ),
+        TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0.0, end: progress.xp / (progress.level * 100)),
+          duration: const Duration(seconds: 1),
+          builder: (context, value, child) {
+            return LinearProgressIndicator(
+              value: value,
+              backgroundColor: Colors.white.withOpacity(0.3),
+              valueColor: const AlwaysStoppedAnimation<Color>(Colors.yellow),
+              minHeight: 10,
+            );
+          },
+        ),
+        Text(
+          'XP: ${progress.xp}/${progress.level * 100}',
+          style: const TextStyle(color: Colors.white),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStreakCounter(UserProgress progress, BuildContext context) {
+    return Row(
+      children: [
+        const Icon(Icons.fireplace, color: Colors.orange, size: 32),
+        const SizedBox(width: 8),
+        Text(
+          'Ketma-ket kunlar: ${progress.currentStreak}',
+          style: const TextStyle(color: Colors.white, fontSize: 18),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBadgesList(UserProgress progress, BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Nishonlar:',
+          style: TextStyle(color: Colors.white, fontSize: 18),
+        ),
+        Wrap(
+          spacing: 8,
+          children: progress.badges
+              .map(
+                (badge) => TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0.0, end: 1.0),
+                  duration: const Duration(milliseconds: 500),
+                  builder: (context, value, child) {
+                    return Transform.scale(
+                      scale: value,
+                      child: Chip(
+                        label: Text(badge),
+                        backgroundColor: Colors.green,
+                        avatar: const Icon(Icons.star, color: Colors.yellow),
+                      ),
+                    );
+                  },
+                ),
+              )
+              .toList(),
+        ),
+      ],
+    );
+  }
+}
+
 // ============ GOALS SCREEN ============
 class GoalsScreen extends ConsumerWidget {
   const GoalsScreen({Key? key}) : super(key: key);
 
+  int calculateXp(int targetDays) {
+    if (targetDays <= 3) return 100;
+    if (targetDays <= 5) return 170;
+    if (targetDays <= 10) return 200;
+    if (targetDays <= 20) return 300;
+    return 500;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final goals = ref.watch(goalsProvider);
-    final opportunities = ref.watch(opportunityViewModelProvider);
+
+    // Active va Completed goals ga bo'lish
+    final activeGoals = goals.where((g) => !g.isCompleted).toList();
+    final completedGoals = goals.where((g) => g.isCompleted).toList();
 
     return SafeArea(
       child: Padding(
@@ -1599,91 +1989,67 @@ class GoalsScreen extends ConsumerWidget {
                         ],
                       ),
                     )
-                  : ListView.builder(
-                      itemCount: goals.length,
-                      itemBuilder: (context, index) {
-                        final goal = goals[index];
-                        final daysElapsed = DateTime.now()
-                            .difference(goal.startDate)
-                            .inDays;
-                        final progress = (daysElapsed / goal.targetDays).clamp(
-                          0.0,
-                          1.0,
-                        );
-
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 16),
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: AppColors.cardBg(context),
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.1),
-                                blurRadius: 10,
-                                offset: const Offset(0, 5),
+                  : SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Active Goals bo'limi
+                          Text(
+                            'Faol Maqsadlar',
+                            style: TextStyle(
+                              fontSize: ResponsiveHelper.getFontSize(
+                                context,
+                                20,
                               ),
-                            ],
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primary,
+                            ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      goal.title,
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        color: AppColors.textPrimary(context),
-                                      ),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    icon: Icon(
-                                      goal.isCompleted
-                                          ? Icons.check_circle
-                                          : Icons.check_circle_outline,
-                                      color: goal.isCompleted
-                                          ? AppColors.secondary
-                                          : AppColors.textSecondary(context),
-                                    ),
-                                    onPressed: () {
-                                      ref
-                                          .read(goalsProvider.notifier)
-                                          .toggleGoalCompletion(goal.id);
-                                    },
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                '$daysElapsed / ${goal.targetDays} kun',
+                          const SizedBox(height: 16),
+                          if (activeGoals.isEmpty)
+                            Center(
+                              child: Text(
+                                'Faol maqsadlar yo\'q',
                                 style: TextStyle(
                                   color: AppColors.textSecondary(context),
+                                  fontSize: 16,
                                 ),
                               ),
-                              const SizedBox(height: 8),
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(10),
-                                child: LinearProgressIndicator(
-                                  value: progress,
-                                  minHeight: 10,
-                                  backgroundColor: AppColors.textSecondary(
-                                    context,
-                                  ).withOpacity(0.2),
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    AppColors.secondary,
-                                  ),
-                                ),
+                            )
+                          else
+                            ...activeGoals.map(
+                              (goal) => _buildGoalCard(context, ref, goal),
+                            ),
+                          const SizedBox(height: 30),
+                          // Completed Goals bo'limi
+                          Text(
+                            'Tugatilgan Maqsadlar',
+                            style: TextStyle(
+                              fontSize: ResponsiveHelper.getFontSize(
+                                context,
+                                20,
                               ),
-                            ],
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.secondary,
+                            ),
                           ),
-                        );
-                      },
+                          const SizedBox(height: 16),
+                          if (completedGoals.isEmpty)
+                            Center(
+                              child: Text(
+                                'Tugatilgan maqsadlar yo\'q',
+                                style: TextStyle(
+                                  color: AppColors.textSecondary(context),
+                                  fontSize: 16,
+                                ),
+                              ),
+                            )
+                          else
+                            ...completedGoals.map(
+                              (goal) => _buildGoalCard(context, ref, goal),
+                            ),
+                        ],
+                      ),
                     ),
             ),
           ],
@@ -1692,9 +2058,229 @@ class GoalsScreen extends ConsumerWidget {
     );
   }
 
+  Widget _buildGoalCard(BuildContext context, WidgetRef ref, Goal goal) {
+    final daysElapsed = DateTime.now().difference(goal.startDate).inDays;
+    final progress = (daysElapsed / goal.targetDays).clamp(0.0, 1.0);
+    final isCompleted = goal.isCompleted;
+    final isOverdue = daysElapsed > goal.targetDays && !isCompleted;
+
+    // Colorful dizayn: progress ga qarab rang
+    final cardColor = isCompleted
+        ? AppColors.secondary.withOpacity(0.8)
+        : isOverdue
+        ? AppColors.error.withOpacity(0.8)
+        : AppColors.accent.withOpacity(0.8);
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOut,
+      builder: (context, value, child) {
+        return Transform.scale(
+          scale: value,
+          child: Opacity(
+            opacity: value,
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [cardColor, cardColor.withOpacity(0.6)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: cardColor.withOpacity(0.5),
+                    blurRadius: 10,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.delete, color: Colors.white),
+                        onPressed: () => ref
+                            .read(goalsProvider.notifier)
+                            .removeGoal(goal.id),
+                      ),
+                      Expanded(
+                        child: Text(
+                          goal.title,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          isCompleted
+                              ? Icons.check_circle
+                              : Icons.check_circle_outline,
+                          color: Colors.white,
+                        ),
+                        onPressed: () {
+                          ref
+                              .read(goalsProvider.notifier)
+                              .toggleGoalCompletion(goal.id);
+                          final updatedGoal = ref
+                              .read(goalsProvider)
+                              .firstWhere((g) => g.id == goal.id);
+                          if (updatedGoal.isCompleted &&
+                              daysElapsed >= goal.targetDays) {
+                            ref
+                                .read(progressProvider.notifier)
+                                .addXp(calculateXp(goal.targetDays));
+                            ref
+                                .read(progressProvider.notifier)
+                                .addBadge('Maqsad Ustasi');
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '$daysElapsed / ${goal.targetDays} kun',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 10,
+                      backgroundColor: Colors.white.withOpacity(0.2),
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Murakkab logika: Subtasks qo'shish va check qilish
+                  if (!isCompleted) // Tugatilgan bo'lsa subtasks ko'rsatilmaydi va qo'shilmaydi
+                    _buildSubtasksSection(context, ref, goal),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSubtasksSection(BuildContext context, WidgetRef ref, Goal goal) {
+    // O'ylangan logika: Har bir goal uchun subtasks (kunlik vazifalar) qo'shish
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Kunlik Vazifalar',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        if (goal.subtasks.isEmpty)
+          const Text(
+            'Vazifalar yo\'q',
+            style: TextStyle(color: Colors.white70),
+          ),
+        ...goal.subtasks.asMap().entries.map((entry) {
+          final index = entry.key;
+          final subtask = entry.value;
+          return Row(
+            children: [
+              Checkbox(
+                value: subtask.isCompleted,
+                onChanged: (value) {
+                  if (value != null) {
+                    ref
+                        .read(goalsProvider.notifier)
+                        .toggleSubtaskCompletion(goal.id, index);
+                    if (value) {
+                      // Check qilinganda XP qo'shish va streak update
+                      ref.read(progressProvider.notifier).addXp(20);
+                      ref.read(progressProvider.notifier).updateStreak(true);
+                      ref
+                          .read(progressProvider.notifier)
+                          .addBadge('Kunlik Vazifa Ustasi');
+                    }
+                  }
+                },
+                checkColor: AppColors.primary,
+                activeColor: Colors.white,
+              ),
+              Expanded(
+                child: Text(
+                  subtask.title,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          );
+        }),
+        ElevatedButton.icon(
+          onPressed: () {
+            // Subtask qo'shish dialogi (o'zim o'ylagan kreativ logika)
+            _showAddSubtaskDialog(context, ref, goal);
+          },
+          icon: const Icon(Icons.add),
+          label: const Text('Yangi Vazifa Qo\'shish'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.white,
+            foregroundColor: AppColors.primary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showAddSubtaskDialog(BuildContext context, WidgetRef ref, Goal goal) {
+    final subtaskController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Yangi Kunlik Vazifa'),
+        content: TextField(
+          controller: subtaskController,
+          decoration: const InputDecoration(
+            hintText: 'Masalan: 30 daqiqa yurish',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Bekor'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (subtaskController.text.isNotEmpty) {
+                ref
+                    .read(goalsProvider.notifier)
+                    .addSubtask(
+                      goal.id,
+                      Subtask(title: subtaskController.text),
+                    );
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('Qo\'shish'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showAddGoalDialog(BuildContext context, WidgetRef ref) {
     final titleController = TextEditingController();
-    int targetDays = 30;
+    int targetDays = 0;
 
     showDialog(
       context: context,
@@ -1708,42 +2294,83 @@ class GoalsScreen extends ConsumerWidget {
             'Yangi Maqsad',
             style: TextStyle(color: AppColors.textPrimary(context)),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleController,
-                style: TextStyle(color: AppColors.textPrimary(context)),
-                decoration: InputDecoration(
-                  labelText: 'Maqsad',
-                  labelStyle: TextStyle(
-                    color: AppColors.textSecondary(context),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(
-                      color: AppColors.textSecondary(context),
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: AppColors.primary),
+          content: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.0, end: 1.0),
+            duration: const Duration(milliseconds: 800),
+            builder: (context, value, child) {
+              return Transform.scale(
+                scale: value,
+                child: Opacity(
+                  opacity: value,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: titleController,
+                        style: TextStyle(color: AppColors.textPrimary(context)),
+                        decoration: InputDecoration(
+                          labelText: 'Maqsad',
+                          labelStyle: TextStyle(
+                            color: AppColors.textSecondary(context),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(
+                              color: AppColors.textSecondary(context),
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: AppColors.primary),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Muddati: $targetDays kun',
+                        style: TextStyle(
+                          color: AppColors.textSecondary(context),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          SizedBox(
+                            height: 200,
+                            width: 200,
+                            child: CircularProgressIndicator(
+                              value: targetDays / 666,
+                              strokeWidth: 8,
+                              backgroundColor: AppColors.secondary.withOpacity(
+                                0.3,
+                              ),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                AppColors.primary,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '$targetDays',
+                            style: TextStyle(
+                              fontSize: 40,
+                              color: AppColors.textPrimary(context),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Slider(
+                        value: targetDays.toDouble(),
+                        min: 0,
+                        max: 666,
+                        divisions: 666,
+                        activeColor: AppColors.primary,
+                        onChanged: (value) =>
+                            setState(() => targetDays = value.toInt()),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Muddati: $targetDays kun',
-                style: TextStyle(color: AppColors.textSecondary(context)),
-              ),
-              Slider(
-                value: targetDays.toDouble(),
-                min: 7,
-                max: 90,
-                divisions: 11,
-                activeColor: AppColors.primary,
-                onChanged: (value) =>
-                    setState(() => targetDays = value.toInt()),
-              ),
-            ],
+              );
+            },
           ),
           actions: [
             TextButton(
@@ -1767,6 +2394,12 @@ class GoalsScreen extends ConsumerWidget {
                         ),
                       );
                   Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text('Ajoyib maqsad qo\'shildi!'),
+                      backgroundColor: AppColors.secondary,
+                    ),
+                  );
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -1949,6 +2582,35 @@ class _AddOpportunityScreenState extends ConsumerState<AddOpportunityScreen> {
     super.dispose();
   }
 
+  void _showAddCategoryDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Yangi kategoriya'),
+        content: TextField(controller: controller),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Bekor'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (controller.text.isNotEmpty) {
+                ref
+                    .read(categoriesProvider.notifier)
+                    .addCategory(controller.text.trim());
+                setState(() => _selectedCategory = controller.text.trim());
+              }
+              Navigator.pop(context);
+            },
+            child: const Text('Qo\'shish'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _submitForm() {
     if (_formKey.currentState!.validate()) {
       final opportunity = MissedOpportunity(
@@ -2053,21 +2715,27 @@ class _AddOpportunityScreenState extends ConsumerState<AddOpportunityScreen> {
                         ),
                         contentPadding: const EdgeInsets.all(16),
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Sarlavha kiriting';
-                        }
-                        return null;
-                      },
+                      validator: (value) =>
+                          value?.isEmpty ?? true ? 'Sarlavha kiriting' : null,
                     ),
                     const SizedBox(height: 24),
-                    Text(
-                      'Kategoriya',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary(context),
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Kategoriya',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary(context),
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.add, color: AppColors.primary),
+                          onPressed: _showAddCategoryDialog,
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     Container(
@@ -2085,17 +2753,13 @@ class _AddOpportunityScreenState extends ConsumerState<AddOpportunityScreen> {
                           color: AppColors.textPrimary(context),
                           fontSize: 16,
                         ),
-                        items: categories.map((category) {
-                          return DropdownMenuItem(
-                            value: category,
-                            child: Text(category),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() => _selectedCategory = value);
-                          }
-                        },
+                        items: categories
+                            .map(
+                              (c) => DropdownMenuItem(value: c, child: Text(c)),
+                            )
+                            .toList(),
+                        onChanged: (value) =>
+                            setState(() => _selectedCategory = value!),
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -2125,12 +2789,8 @@ class _AddOpportunityScreenState extends ConsumerState<AddOpportunityScreen> {
                         ),
                         contentPadding: const EdgeInsets.all(16),
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Sabab kiriting';
-                        }
-                        return null;
-                      },
+                      validator: (value) =>
+                          value?.isEmpty ?? true ? 'Sabab kiriting' : null,
                     ),
                     const SizedBox(height: 24),
                     Text(
@@ -2149,23 +2809,20 @@ class _AddOpportunityScreenState extends ConsumerState<AddOpportunityScreen> {
                           initialDate: _selectedDate,
                           firstDate: DateTime(2020),
                           lastDate: DateTime.now(),
-                          builder: (context, child) {
-                            return Theme(
-                              data: Theme.of(context).copyWith(
-                                colorScheme: ColorScheme.dark(
-                                  primary: AppColors.primary,
-                                  onPrimary: Colors.white,
-                                  surface: AppColors.cardBg(context),
-                                  onSurface: AppColors.textPrimary(context),
-                                ),
+                          builder: (context, child) => Theme(
+                            data: Theme.of(context).copyWith(
+                              colorScheme: ColorScheme.dark(
+                                primary: AppColors.primary,
+                                onPrimary: Colors.white,
+                                surface: AppColors.cardBg(context),
+                                onSurface: AppColors.textPrimary(context),
                               ),
-                              child: child!,
-                            );
-                          },
+                            ),
+                            child: child!,
+                          ),
                         );
-                        if (picked != null) {
+                        if (picked != null)
                           setState(() => _selectedDate = picked);
-                        }
                       },
                       child: Container(
                         padding: const EdgeInsets.all(16),
@@ -2202,21 +2859,20 @@ class _AddOpportunityScreenState extends ConsumerState<AddOpportunityScreen> {
                     ),
                     const SizedBox(height: 8),
                     Row(
-                      children: List.generate(5, (index) {
-                        return GestureDetector(
-                          onTap: () => setState(() => _impactLevel = index + 1),
+                      children: List.generate(
+                        5,
+                        (i) => GestureDetector(
+                          onTap: () => setState(() => _impactLevel = i + 1),
                           child: Padding(
                             padding: const EdgeInsets.only(right: 8),
                             child: Icon(
-                              index < _impactLevel
-                                  ? Icons.star
-                                  : Icons.star_border,
+                              i < _impactLevel ? Icons.star : Icons.star_border,
                               color: const Color(0xFFFFD700),
                               size: 40,
                             ),
                           ),
-                        );
-                      }),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 32),
                     SizedBox(
